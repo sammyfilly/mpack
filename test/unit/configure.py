@@ -53,7 +53,7 @@ else:
 if not shutil.which(cc):
     raise Exception("Compiler cannot be found!")
 
-if cc.lower() == "cl" or cc.lower() == "cl.exe":
+if cc.lower() in ["cl", "cl.exe"]:
     compiler = "MSVC"
 elif cc.endswith("cproc"):
     compiler = "cproc"
@@ -84,7 +84,7 @@ else:
                     compiler = "GCC"
                     break
 
-print("Using " + compiler + " compiler with executable: " + cc)
+print(f"Using {compiler} compiler with executable: {cc}")
 
 if compiler == "MSVC":
     obj_extension = ".obj"
@@ -106,7 +106,7 @@ config = {
 }
 
 flagtest_src = path.join(globalbuild, "flagtest.c")
-flagtest_exe = path.join(globalbuild, "flagtest" + exe_extension)
+flagtest_exe = path.join(globalbuild, f"flagtest{exe_extension}")
 with open(flagtest_src, "w") as out:
     out.write("""
 int main(int argc, char** argv) {
@@ -129,7 +129,7 @@ def checkFlags(flags):
     sys.stdout.flush()
 
     if msvc:
-        cmd = [cc, "/WX"] + flags + [flagtest_src, "/Fe" + flagtest_exe]
+        cmd = [cc, "/WX"] + flags + [flagtest_src, f"/Fe{flagtest_exe}"]
     else:
         cmd = [cc, "-Werror"] + flags + [flagtest_src, "-o", flagtest_exe]
     ret = subprocess.run(cmd, universal_newlines=True,
@@ -146,9 +146,7 @@ def checkFlags(flags):
 
 def flagsIfSupported(flags):
     if checkFlags(flags):
-        if isinstance(flags, str):
-            return [flags]
-        return flags
+        return [flags] if isinstance(flags, str) else flags
     return []
 
 # We use -Og for all debug builds if we have it, but ONLY under GCC. It can
@@ -317,8 +315,8 @@ def addBuild(name, cppflags, ldflags=[]):
     builds[name] = Build(name, cppflags[:], ldflags[:])
 
 def addDebugReleaseBuilds(name, cppflags, ldflags = []):
-    addBuild(name + "-debug", cppflags + debugflags, ldflags)
-    addBuild(name + "-release", cppflags + releaseflags, ldflags)
+    addBuild(f"{name}-debug", cppflags + debugflags, ldflags)
+    addBuild(f"{name}-release", cppflags + releaseflags, ldflags)
 
 addDebugReleaseBuilds('default', defaultfeatures + allconfigs + cflags)
 addDebugReleaseBuilds('everything', allfeatures + allconfigs + cflags)
@@ -383,7 +381,7 @@ elif compiler != "TinyCC":
         addDebugReleaseBuilds('c99', allfeatures + allconfigs + ["-std=c99"])
 
     for version in ["c++11", "gnu++11", "c++14", "c++17"]:
-        flags = cxxflags + ["-std=" + version]
+        flags = cxxflags + [f"-std={version}"]
         if checkFlags(flags):
             addDebugReleaseBuilds(version, allfeatures + allconfigs + flags, cxxlinkflags)
 
@@ -426,10 +424,7 @@ elif compiler != "TinyCC":
             builds["lto"].run_wrapper = "valgrind"
 
 # size-optimized build (both debug and release)
-if msvc:
-    sizeOptimize = ["/O1", "/MD"]
-else:
-    sizeOptimize = ["-Os"]
+sizeOptimize = ["/O1", "/MD"] if msvc else ["-Os"]
 addBuild('optimize-size-debug', allfeatures + allconfigs + cflags + sizeOptimize +
         ["-DMPACK_OPTIMIZE_FOR_SIZE=1", "-DMPACK_STRINGS=0", "-DDEBUG"])
 addBuild('optimize-size-release', allfeatures + allconfigs + cflags + sizeOptimize +
@@ -478,10 +473,7 @@ srcs = []
 
 for paths in [path.join("src", "mpack"), path.join("test", "unit", "src")]:
     for root, dirs, files in os.walk(paths):
-        for name in files:
-            if name.endswith(".c"):
-                srcs.append(os.path.join(root, name))
-
+        srcs.extend(os.path.join(root, name) for name in files if name.endswith(".c"))
 ninja = path.join(globalbuild, "build.ninja")
 with open(ninja, "w") as out:
     out.write("# This file is auto-generated.\n")
@@ -494,10 +486,10 @@ with open(ninja, "w") as out:
 
     out.write("rule compile\n")
     if msvc:
-        out.write(" command = " + cc + " /showIncludes $flags /c $in /Fo$out\n")
+        out.write(f" command = {cc}" + " /showIncludes $flags /c $in /Fo$out\n")
         out.write(" deps = msvc\n")
     else:
-        out.write(" command = " + cc + " " + "-MD -MF $out.d $flags -c $in -o $out\n")
+        out.write(f" command = {cc} " + "-MD -MF $out.d $flags -c $in -o $out\n")
         out.write(" deps = gcc\n")
         out.write(" depfile = $out.d\n")
     out.write("\n")
@@ -506,7 +498,7 @@ with open(ninja, "w") as out:
     if msvc:
         out.write(" command = link $flags $in /OUT:$out\n")
     else:
-        out.write(" command = " + cc + " $flags $in -o $out\n")
+        out.write(f" command = {cc}" + " $flags $in -o $out\n")
     out.write("\n")
 
     # unfortunately right now the unit tests all try to write to the same files,
@@ -535,29 +527,29 @@ with open(ninja, "w") as out:
         if msvc:
             # Specify a per-build PDB path so that we don't try to link at the
             # same time a PDB file is being written
-            cppflags.append("/Fd" + buildfolder)
+            cppflags.append(f"/Fd{buildfolder}")
             ldflags.append("/DEBUG")
 
         for src in srcs:
             obj = path.join(buildfolder, "objs", src[:-2] + obj_extension)
             objs.append(obj)
-            out.write("build " + obj + ": compile " + src + "\n")
+            out.write(f"build {obj}: compile {src}" + "\n")
             out.write(" flags = " + " ".join(cppflags) + "\n")
 
         runner = path.join(buildfolder, "runner") + exe_extension
 
-        out.write("build " + runner + ": link " + " ".join(objs) + "\n")
+        out.write(f"build {runner}: link " + " ".join(objs) + "\n")
         out.write(" flags = " + " ".join(ldflags) + "\n")
 
         # You can omit "run-" in front of any build to just build it without
         # running it. This lets you run it some other way (e.g. under gdb,
         # with/without Valgrind, etc.)
-        out.write("build " + buildname + ": phony " + runner + "\n\n")
+        out.write(f"build {buildname}: phony {runner}" + "\n\n")
 
-        out.write("build run-" + buildname + ": run " + runner + "\n")
+        out.write(f"build run-{buildname}: run {runner}" + "\n")
         if build.run_wrapper:
             run_wrapper = build.run_wrapper
-            out.write(" run_wrapper = " + run_wrapper + " ")
+            out.write(f" run_wrapper = {run_wrapper} ")
             if run_wrapper == "valgrind":
                 out.write("--leak-check=full --error-exitcode=1 ")
                 out.write("--suppressions=tools/valgrind-suppressions ")
@@ -599,7 +591,7 @@ with open(ninja, "w") as out:
             out.write(build)
     out.write("\n")
 
-print("Generated " + ninja)
+print(f"Generated {ninja}")
 
 with open(path.join(globalbuild, "help"), "w") as out:
     out.write("\n")
@@ -612,5 +604,5 @@ with open(path.join(globalbuild, "help"), "w") as out:
     out.write("    help\n")
     out.write("\n")
     for build in sorted(builds.keys()):
-        out.write("    run-" + build + "\n")
+        out.write(f"    run-{build}" + "\n")
     out.close()
